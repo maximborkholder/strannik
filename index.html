@@ -15,7 +15,7 @@
 <canvas id="game"></canvas>
 <input id="mobile-code-input" type="text" maxlength="6" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" style="position:fixed; opacity:0; z-index:-1; top:-100px; left:-100px; width:1px; height:1px; font-size:16px; border:none; outline:none; background:transparent;">
 <script>
-/* ============ СТРАННИК КОРОЛЕВСТВА — v13 (онлайн через WebSocket) ============ */
+/* ============ СТРАННИК КОРОЛЕВСТВА — v13.2 (онлайн WebSocket + фиксы) ============ */
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -87,29 +87,16 @@ const SFX = {
 function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; layoutControls(); updateCursor(); }
 window.addEventListener('resize', resize);
 
-/* ---------- КОНСТАНТЫ ---------- */
 const TILE = 48, WORLD_W = 140, WORLD_H = 140;
 const AUTO_AIM_RANGE = 560, TALK_RANGE = 80, HOUSE_RANGE = 58, CAVE_RANGE = 65, CART_RANGE = 90, PET_RANGE = 110;
 const ZOOM = 0.55, SAVE_KEY = 'strannik_v11_save', MAX_LEVEL = 60, MAX_ARMOR_CAP = 0.80;
 
-/* ---------- СЮЖЕТ ---------- */
-let story = {
-  chapter: 0, endingChoice: null, bossesKilled: 0,
-  finalCaveUnlocked: false, finalCaveCleared: false,
-  firstCaveSeen: false, skillPoints: 0
-};
+let story = { chapter: 0, endingChoice: null, bossesKilled: 0, finalCaveUnlocked: false, finalCaveCleared: false, firstCaveSeen: false, skillPoints: 0 };
 
 const CHAPTER_NAMES = [
-  'Пролог — Перекрёсток',
-  'Королевство — Тихие голоса',
-  'Восточные пустоши — Одиночки',
-  'Западный лес — Забытое имя',
-  'Северные горы — Гробница Венца',
-  'Южные пески — Город под песком',
-  'Финал — Первый Хранитель',
-  'После Венца — Порядок',
-  'После Венца — Осколки',
-  'После Венца — Память'
+  'Пролог — Перекрёсток', 'Королевство — Тихие голоса', 'Восточные пустоши — Одиночки',
+  'Западный лес — Забытое имя', 'Северные горы — Гробница Венца', 'Южные пески — Город под песком',
+  'Финал — Первый Хранитель', 'После Венца — Порядок', 'После Венца — Осколки', 'После Венца — Память'
 ];
 
 const CART_DIALOGUES = [
@@ -126,10 +113,8 @@ const CART_DIALOGUES = [
 ];
 
 const BOSS_WHISPERS = [
-  '«Ты не первый, кто пришёл сюда... но ты первый, кто слушает.»',
-  '«Я согласился первым. Тогда это казалось правильным.»',
-  '«Если ты соберёшь Венец — не забудь тех, кто его держал.»',
-  '«Тихие говорят правду. Просто их правда — не вся.»',
+  '«Ты не первый, кто пришёл сюда... но ты первый, кто слушает.»', '«Я согласился первым. Тогда это казалось правильным.»',
+  '«Если ты соберёшь Венец — не забудь тех, кто его держал.»', '«Тихие говорят правду. Просто их правда — не вся.»',
   '«Имя, которое ты носишь, — не твоё. Но и моё уже нет.»'
 ];
 
@@ -215,8 +200,9 @@ let pauseMessage = '', pauseMessageTimer = 0;
 let hasSave = false;
 let stepTimer = 0;
 
-/* ---------- СЕТЕВОЕ СОСТОЯНИЕ (WebSocket) ---------- */
+/* ---------- СЕТЕВОЕ СОСТОЯНИЕ ---------- */
 let ws = null, isOnline = false, isHost = false, roomCode = null;
+let myId = null;
 let remotePlayers = new Map();
 let nextNetEnemyId = 1;
 let onlineDialog = null;
@@ -234,23 +220,17 @@ const RACE_LIST = [
 ];
 
 const CLASS_LIST = [
-  { id: 'warrior', name: 'Воин', color: '#c9403f', icon: '⚔', weapon: 'sword_shield', projectileType: 'fire', resourceType: 'stamina',
-    desc: 'Меч и щит. Блок и СИЛЬНЫЙ УДАР',
+  { id: 'warrior', name: 'Воин', color: '#c9403f', icon: '⚔', weapon: 'sword_shield', projectileType: 'fire', resourceType: 'stamina', desc: 'Меч и щит. Блок и СИЛЬНЫЙ УДАР',
     base: { hp: 145, mana: 60, stamina: 100, speed: 185, swordDmg: 24, swordRange: 72, swordCd: 0.42, swordArc: 1.3, fireDmg: 40, fireCost: 22, fireCd: 1.0, manaRegen: 0, staminaRegen: 14, hpRegen: 0, shieldArmor: 0.20, blockStaminaCost: 15 } },
-  { id: 'hunter', name: 'Охотник', color: '#6ab04a', icon: '➶', weapon: 'bow', projectileType: 'arrow', resourceType: 'stamina',
-    desc: 'Лук. Питомец. +50% лута',
+  { id: 'hunter', name: 'Охотник', color: '#6ab04a', icon: '➶', weapon: 'bow', projectileType: 'arrow', resourceType: 'stamina', desc: 'Лук. Питомец. +50% лута',
     base: { hp: 105, mana: 70, stamina: 80, speed: 215, swordDmg: 18, swordRange: 60, swordCd: 0.38, swordArc: 1.0, fireDmg: 30, fireCost: 18, fireCd: 0.55, manaRegen: 0, staminaRegen: 12, hpRegen: 0, shieldArmor: 0 } },
-  { id: 'mage', name: 'Маг', color: '#5ba8d0', icon: '✦', weapon: 'staff', projectileType: 'arcane', resourceType: 'mana',
-    desc: 'Посох — тайные заклинания',
+  { id: 'mage', name: 'Маг', color: '#5ba8d0', icon: '✦', weapon: 'staff', projectileType: 'arcane', resourceType: 'mana', desc: 'Посох — тайные заклинания',
     base: { hp: 85, mana: 130, speed: 175, swordDmg: 9, swordRange: 55, swordCd: 0.46, swordArc: 0.9, fireDmg: 44, fireCost: 18, fireCd: 0.55, manaRegen: 15, staminaRegen: 0, hpRegen: 0, shieldArmor: 0 } },
-  { id: 'rogue', name: 'Разбойник', color: '#a048a0', icon: '†', weapon: 'daggers', projectileType: 'dagger', resourceType: 'stamina',
-    desc: 'Кинжалы. Боеприпасы',
+  { id: 'rogue', name: 'Разбойник', color: '#a048a0', icon: '†', weapon: 'daggers', projectileType: 'dagger', resourceType: 'stamina', desc: 'Кинжалы. Боеприпасы',
     base: { hp: 95, mana: 40, stamina: 80, speed: 235, swordDmg: 15, swordRange: 55, swordCd: 0.25, swordArc: 1.5, fireDmg: 20, fireCost: 14, fireCd: 0.45, manaRegen: 0, staminaRegen: 11, hpRegen: 0, shieldArmor: 0 } },
-  { id: 'priest', name: 'Жрец', color: '#f0d98a', icon: '✝', weapon: 'staff', projectileType: 'holy', resourceType: 'mana',
-    desc: 'Посох — святая магия',
+  { id: 'priest', name: 'Жрец', color: '#f0d98a', icon: '✝', weapon: 'staff', projectileType: 'holy', resourceType: 'mana', desc: 'Посох — святая магия',
     base: { hp: 115, mana: 110, speed: 180, swordDmg: 12, swordRange: 66, swordCd: 0.42, swordArc: 1.15, fireDmg: 26, fireCost: 14, fireCd: 0.5, manaRegen: 9, staminaRegen: 0, hpRegen: 2.5, shieldArmor: 0 } },
-  { id: 'druid', name: 'Друид', color: '#7a8a4a', icon: '❧', weapon: 'staff', projectileType: 'nature', resourceType: 'mana',
-    desc: 'Посох — сила природы',
+  { id: 'druid', name: 'Друид', color: '#7a8a4a', icon: '❧', weapon: 'staff', projectileType: 'nature', resourceType: 'mana', desc: 'Посох — сила природы',
     base: { hp: 125, mana: 95, speed: 190, swordDmg: 14, swordRange: 68, swordCd: 0.42, swordArc: 1.2, fireDmg: 30, fireCost: 13, fireCd: 0.45, manaRegen: 10, staminaRegen: 0, hpRegen: 1.5, shieldArmor: 0 } }
 ];
 
@@ -349,7 +329,6 @@ const NPC_RACES = [
   { name: 'Орк', color: '#6a8a4a', skin: '#90a870', roles: ['guard','smith','hunter'] }
 ];
 
-/* ---------- МИНИКАРТА ---------- */
 const MM_RES = 400, MM_MARGIN = 12;
 let minimapTerrain = null;
 function buildMinimapTerrain() {
@@ -362,15 +341,11 @@ function buildMinimapTerrain() {
       const t = map[y][x];
       let color;
       if (t === 0) color = `rgb(${th.grass[0]},${th.grass[1]},${th.grass[2]})`;
-      else if (t === 1) color = '#6a5230';
-      else if (t === 10) color = '#888078';
+      else if (t === 1) color = '#6a5230'; else if (t === 10) color = '#888078';
       else if (t === 2) color = `rgb(${th.treeTop[0]},${th.treeTop[1]},${th.treeTop[2]})`;
-      else if (t === 3) color = '#585850';
-      else if (t === 4) color = th.water;
-      else if (t === 5) color = '#8a4a2a';
-      else if (t === 11) color = '#1a0a0a';
-      else if (t === 13) color = '#4a90d0';
-      else if (t === 14) color = '#7a5a3a';
+      else if (t === 3) color = '#585850'; else if (t === 4) color = th.water;
+      else if (t === 5) color = '#8a4a2a'; else if (t === 11) color = '#1a0a0a';
+      else if (t === 13) color = '#4a90d0'; else if (t === 14) color = '#7a5a3a';
       else if (t === 15) color = '#c8a040';
       c.fillStyle = color;
       c.fillRect(x * px, y * px, px + 0.6, px + 0.6);
@@ -433,7 +408,6 @@ function graphDistance(a, b) {
   return 99;
 }
 
-/* ---------- МОБИЛЬНОЕ УПРАВЛЕНИЕ ---------- */
 let isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 let joystick = { active: false, id: null, bx: 0, by: 0, dx: 0, dy: 0, maxDist: 62 };
 const buttons = { sword: { x: 0, y: 0, r: 52, pressed: false, id: null }, fire: { x: 0, y: 0, r: 44, pressed: false, id: null } };
@@ -451,7 +425,6 @@ function setTouchMode(v) {
   if (!v) { joystick.active = false; joystick.dx = 0; joystick.dy = 0; buttons.sword.pressed = false; buttons.fire.pressed = false; }
 }
 
-/* ---------- ГЕНЕРАЦИЯ ---------- */
 function genMap(locInfo) {
   map = [];
   for (let y = 0; y < WORLD_H; y++) { map[y] = []; for (let x = 0; x < WORLD_W; x++) map[y][x] = 0; }
@@ -519,8 +492,7 @@ function genVillages() {
         map[vcy + y][vcx + x] = 1;
       }
     map[vcy][vcx] = 13;
-    map[vcy - 1][vcx - 3] = 15;
-    map[vcy - 1][vcx + 3] = 15;
+    map[vcy - 1][vcx - 3] = 15; map[vcy - 1][vcx + 3] = 15;
     for (let ang = 0; ang < 32; ang++) {
       const a = ang * Math.PI / 16;
       const dx = Math.round(Math.cos(a) * 8), dy = Math.round(Math.sin(a) * 8);
@@ -731,8 +703,7 @@ function spawnFinalCave() {
     }
   map[tcy][tcx] = 11;
   finalCaveObj = {
-    tcx, tcy,
-    x: tcx * TILE + TILE / 2, y: tcy * TILE + TILE / 2,
+    tcx, tcy, x: tcx * TILE + TILE / 2, y: tcy * TILE + TILE / 2,
     doorX: tcx * TILE + TILE / 2, doorY: tcy * TILE + TILE / 2,
     interior: null, cleared: false, pendingLoot: null, isFinal: true
   };
@@ -773,8 +744,7 @@ function showFinalDialogue() {
   dialog = {
     npc: { name: 'Первый Хранитель', race: 'Тот, чьё имя ты носишь' },
     text: '«Венец был клеткой. Мы её сломали. Стражи — те, кто пытался склеить её обратно. Тихие хотят склеить её навсегда.\n\nТы — последний, кто может выбрать что-то третье. Что ты выберешь, Странник?»',
-    canAccept: false, canClaim: false, canDeliver: false,
-    isFinal: true, buttons: null
+    canAccept: false, canClaim: false, canDeliver: false, isFinal: true, buttons: null
   };
   SFX.story();
 }
@@ -1420,7 +1390,7 @@ function drawMenu() {
   ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   menuOnlineBtn = { x: obx, y: oby, w: obw, h: obh };
   ctx.font = '10px Georgia, serif'; ctx.fillStyle = 'rgba(168,144,96,0.5)';
-  ctx.textAlign = 'center'; ctx.fillText('v13.0 — онлайн-WebSocket', W / 2, H - 4); ctx.textAlign = 'left';
+  ctx.textAlign = 'center'; ctx.fillText('v13.2 — онлайн + фиксы', W / 2, H - 4); ctx.textAlign = 'left';
 }
 function pointInRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
 function handleMenuClick(x, y) {
@@ -1622,7 +1592,7 @@ function connectWs(code) {
       }, 100),
       setInterval(() => {
         if (!isOnline || !isHost || !ws || ws.readyState !== 1 || gameState !== 'playing' || !player) return;
-        const list = [{ id: 'host', name: player.className || 'Хост', state: getMyState() }];
+        const list = [{ id: myId, name: player.className || 'Хост', state: getMyState() }];
         for (const [pid, rp] of remotePlayers) if (rp.state) list.push({ id: pid, name: rp.name || 'Игрок', state: rp.state });
         ws.send(JSON.stringify({ t: 'players', players: list }));
       }, 100)
@@ -1644,7 +1614,7 @@ function stopOnline() {
   netTimers.forEach(t => clearInterval(t));
   netTimers = [];
   remotePlayers.clear();
-  isOnline = false; isHost = false; roomCode = null; onlineStatus = '';
+  isOnline = false; isHost = false; roomCode = null; onlineStatus = ''; myId = null;
 }
 function getMyState() {
   if (!player) return null;
@@ -1660,6 +1630,7 @@ function getMyState() {
 }
 function handleNetMessage(msg) {
   if (msg.t === 'welcome') {
+    myId = msg.id;
     if (onlineDialog && onlineDialog.tab === 'join' && msg.isHost) {
       addNotification('Комната не найдена: ' + roomCode, '#ff8080');
       onlineStatus = 'Комната не найдена';
@@ -1689,7 +1660,7 @@ function handleNetMessage(msg) {
   } else if (msg.t === 'players') {
     const seen = new Set();
     for (const p of msg.players) {
-      if (p.id === 'host') continue;
+      if (myId !== null && p.id === myId) continue;
       seen.add(p.id);
       let rp = remotePlayers.get(p.id) || { name: 'Игрок' };
       rp.name = p.name || rp.name;
@@ -2365,10 +2336,10 @@ function handlePauseClick(x, y) {
 window.addEventListener('keydown', e => {
   initAudio(); keys[e.code] = true;
   if (onlineDialog) {
-    if (e.code === 'Escape') { 
-      onlineDialog = null; 
+    if (e.code === 'Escape') {
+      onlineDialog = null;
       document.getElementById('mobile-code-input').blur();
-      e.preventDefault(); return; 
+      e.preventDefault(); return;
     }
     if (e.target.id === 'mobile-code-input') return;
     if (!isOnline && onlineDialog.tab === 'join') {
@@ -2429,10 +2400,10 @@ window.addEventListener('keyup', e => { keys[e.code] = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault(); initAudio();
-  if (onlineDialog) { 
+  if (onlineDialog) {
     document.getElementById('mobile-code-input').blur();
-    handleOnlineClick(e.clientX, e.clientY); 
-    return; 
+    handleOnlineClick(e.clientX, e.clientY);
+    return;
   }
   if (gameState === 'menu') { handleMenuClick(e.clientX, e.clientY); return; }
   if (cartDialogue) { handleCartDialogueClick(e.clientX, e.clientY); return; }
@@ -2755,6 +2726,7 @@ function update(dt) {
   }
 }
 
+/* ---------- ОТРИСОВКА ---------- */
 function drawTiles() {
   const th = THEMES[currentLocationId];
   const x0 = Math.max(0, Math.floor(camera.x / TILE));
